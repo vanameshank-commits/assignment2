@@ -32,6 +32,7 @@ public class PlayerMovement1 : MonoBehaviour
     // Camera rotation tracking
     private float xRotation;
     private float yRotation;
+    public float wallTilt { get; set; }
 
     private void Awake()
     {
@@ -85,20 +86,17 @@ public class PlayerMovement1 : MonoBehaviour
 
     private void HandleMouseLook()
     {
-        // Get mouse inputs
         float mouseX = Input.GetAxisRaw("Mouse X") * Time.deltaTime * sensX;
         float mouseY = Input.GetAxisRaw("Mouse Y") * Time.deltaTime * sensY;
 
         yRotation += mouseX;
         xRotation -= mouseY;
-
-        // Clamp x rotation so the player can't look past straight up or straight down
         xRotation = Mathf.Clamp(xRotation, -90f, 90f);
 
-        // Apply rotations
         if (playerCamera != null)
         {
-            playerCamera.rotation = Quaternion.Euler(xRotation, yRotation, 0f);
+            // NEW: We added 'wallTilt' to the Z-axis here instead of 0f
+            playerCamera.rotation = Quaternion.Euler(xRotation, yRotation, wallTilt);
         }
 
         orientation.rotation = Quaternion.Euler(0f, yRotation, 0f);
