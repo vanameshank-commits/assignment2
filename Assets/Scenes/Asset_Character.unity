@@ -674,7 +674,7 @@ MonoBehaviour:
   wallCheckDistance: 0.9
   wallRunGravity: 1
   maxWallRunTime: 2
-  wallJumpUpForce: 7
+  wallJumpUpForce: 4
   wallJumpSideForce: 9
   wallLayer:
     serializedVersion: 2

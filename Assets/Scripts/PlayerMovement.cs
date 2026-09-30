@@ -12,20 +12,20 @@ public class PlayerMovement : MonoBehaviour
 {
     [Header("Movement Settings")]
     public float walkSpeed = 8f;
-    public float wallRunSpeed = 12f;
+    public float wallRunSpeed = 14f;       // Increased for fast, smooth forward momentum
     public float jumpHeight = 2.5f;
     public float gravity = -22f;
 
     [Header("Wall Running Settings")]
     public float wallCheckDistance = 0.9f;
-    public float wallRunGravity = -2.5f;
-    public float maxWallRunTime = 2.0f;
-    public float wallJumpUpForce = 7f;
-    public float wallJumpSideForce = 9f;
+    public float wallRunGravity = -1f;     // Low gravity for horizontal stickiness
+    public float maxWallRunTime = 2.5f;
+    public float wallJumpUpForce = 8f;
+    public float wallJumpSideForce = 10f;
     public LayerMask wallLayer;
 
     [Header("References")]
-    public PlayerCamera playerCam; // Drag Main Camera here
+    public PlayerCamera playerCam;
 
     private CharacterController controller;
     private Vector3 velocity;
@@ -56,26 +56,21 @@ public class PlayerMovement : MonoBehaviour
 
     void CheckForWalls()
     {
-        // Diagonal ray directions for smooth angled latching
         Vector3 leftDir = (-transform.right + transform.forward * 0.4f).normalized;
         Vector3 rightDir = (transform.right + transform.forward * 0.4f).normalized;
 
-        // 3 Vertical Height Origins (High, Mid, Low)
         Vector3 highOrigin = transform.position + Vector3.up * 0.6f;
         Vector3 midOrigin = transform.position;
         Vector3 lowOrigin = transform.position - Vector3.up * 0.6f;
 
-        // Left Side Rays (3 Rays)
         bool leftHigh = Physics.Raycast(highOrigin, leftDir, out RaycastHit leftHighHit, wallCheckDistance, wallLayer);
         bool leftMid = Physics.Raycast(midOrigin, leftDir, out RaycastHit leftMidHit, wallCheckDistance, wallLayer);
         bool leftLow = Physics.Raycast(lowOrigin, leftDir, out RaycastHit leftLowHit, wallCheckDistance, wallLayer);
 
-        // Right Side Rays (3 Rays)
         bool rightHigh = Physics.Raycast(highOrigin, rightDir, out RaycastHit rightHighHit, wallCheckDistance, wallLayer);
         bool rightMid = Physics.Raycast(midOrigin, rightDir, out RaycastHit rightMidHit, wallCheckDistance, wallLayer);
         bool rightLow = Physics.Raycast(lowOrigin, rightDir, out RaycastHit rightLowHit, wallCheckDistance, wallLayer);
 
-        // Require Middle ray plus at least High or Low ray (Ensures surface is a tall wall, not a low curb/box)
         hasWallLeft = leftMid && (leftHigh || leftLow);
         hasWallRight = rightMid && (rightHigh || rightLow);
 
@@ -93,17 +88,19 @@ public class PlayerMovement : MonoBehaviour
             isWallRunning = false;
             wallRunTimer = maxWallRunTime;
 
-            // Kill stored horizontal drift on landing
             velocity.x = 0f;
             velocity.z = 0f;
 
-            if (velocity.y < 0)
-            {
-                velocity.y = -2f;
-            }
+            if (velocity.y < 0) velocity.y = -2f;
         }
         else if ((hasWallLeft || hasWallRight) && isHoldingForward && wallRunTimer > 0)
         {
+            // Lock vertical falling momentum instantly upon touching the wall
+            if (!isWallRunning)
+            {
+                velocity.y = 0f;
+            }
+
             state = MovementState.WallRunning;
             isWallRunning = true;
             wallRunTimer -= Time.deltaTime;
@@ -113,7 +110,6 @@ public class PlayerMovement : MonoBehaviour
             state = MovementState.Airborne;
             isWallRunning = false;
 
-            // Mid-air friction decay for wall jump impulses
             velocity.x = Mathf.Lerp(velocity.x, 0f, Time.deltaTime * 3f);
             velocity.z = Mathf.Lerp(velocity.z, 0f, Time.deltaTime * 3f);
         }
@@ -121,62 +117,55 @@ public class PlayerMovement : MonoBehaviour
 
     void ExecuteMovement()
     {
-        switch (state)
-        {
-            case MovementState.Grounded:
-            case MovementState.Airborne:
-                PerformStandardMovement();
-                break;
+        Vector3 finalMove = Vector3.zero;
 
-            case MovementState.WallRunning:
-                PerformWallRun();
-                break;
+        if (state == MovementState.WallRunning)
+        {
+            RaycastHit wallHit = hasWallLeft ? leftWallHit : rightWallHit;
+
+            // Project forward movement parallel to wall face
+            Vector3 wallDirection = Vector3.ProjectOnPlane(transform.forward, wallHit.normal).normalized;
+            finalMove = wallDirection * wallRunSpeed;
+
+            // Apply light downward float (clamped so you don't plunge)
+            velocity.y += wallRunGravity * Time.deltaTime;
+            velocity.y = Mathf.Max(velocity.y, -1.5f);
+            finalMove.y = velocity.y;
+
+            // Wall Jump
+            if (Input.GetButtonDown("Jump"))
+            {
+                Vector3 wallJumpDirection = (wallHit.normal * wallJumpSideForce) + (Vector3.up * wallJumpUpForce) + (transform.forward * 4f);
+                velocity = wallJumpDirection;
+                wallRunTimer = 0;
+            }
+        }
+        else // Grounded or Airborne
+        {
+            float x = Input.GetAxis("Horizontal");
+            float z = Input.GetAxis("Vertical");
+
+            Vector3 moveDir = transform.right * x + transform.forward * z;
+            finalMove = moveDir * walkSpeed;
+
+            if (Input.GetButtonDown("Jump") && controller.isGrounded)
+            {
+                velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
+            }
+
+            velocity.y += gravity * Time.deltaTime;
+            finalMove.y = velocity.y;
         }
 
-        float currentGravity = isWallRunning ? wallRunGravity : gravity;
-        velocity.y += currentGravity * Time.deltaTime;
-
-        controller.Move(velocity * Time.deltaTime);
+        // Single execution call prevents physics stutter
+        controller.Move(finalMove * Time.deltaTime);
     }
 
-    void PerformStandardMovement()
-    {
-        float x = Input.GetAxis("Horizontal");
-        float z = Input.GetAxis("Vertical");
-
-        Vector3 moveDir = transform.right * x + transform.forward * z;
-        controller.Move(moveDir * walkSpeed * Time.deltaTime);
-
-        if (Input.GetButtonDown("Jump") && controller.isGrounded)
-        {
-            velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
-        }
-    }
-
-    void PerformWallRun()
-    {
-        RaycastHit wallHit = hasWallLeft ? leftWallHit : rightWallHit;
-
-        // Project movement direction along the wall surface
-        Vector3 wallDirection = Vector3.ProjectOnPlane(transform.forward, wallHit.normal);
-        controller.Move(wallDirection * wallRunSpeed * Time.deltaTime);
-
-        // Directional Wall Jump
-        if (Input.GetButtonDown("Jump"))
-        {
-            Vector3 wallJumpDirection = (wallHit.normal * wallJumpSideForce) + (Vector3.up * wallJumpUpForce) + (transform.forward * 4f);
-            velocity = wallJumpDirection;
-            wallRunTimer = 0; // Exit wall run state immediately
-        }
-    }
-
-    // Called during respawn or force resets
     public void ResetVelocity()
     {
         velocity = Vector3.zero;
     }
 
-    // Draws all 6 rays in the Scene View for easy debugging and presentation
     private void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.cyan;
@@ -187,12 +176,10 @@ public class PlayerMovement : MonoBehaviour
         Vector3 midOrigin = transform.position;
         Vector3 lowOrigin = transform.position - Vector3.up * 0.6f;
 
-        // Left 3 Rays
         Gizmos.DrawRay(highOrigin, leftDir * wallCheckDistance);
         Gizmos.DrawRay(midOrigin, leftDir * wallCheckDistance);
         Gizmos.DrawRay(lowOrigin, leftDir * wallCheckDistance);
 
-        // Right 3 Rays
         Gizmos.DrawRay(highOrigin, rightDir * wallCheckDistance);
         Gizmos.DrawRay(midOrigin, rightDir * wallCheckDistance);
         Gizmos.DrawRay(lowOrigin, rightDir * wallCheckDistance);
