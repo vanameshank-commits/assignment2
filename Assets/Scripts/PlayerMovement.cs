@@ -4,107 +4,166 @@ public enum MovementState
 {
     Grounded,
     Airborne,
-    WallRunning
+    HorizontalWallRun,
+    VerticalWallRun
 }
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerMovement : MonoBehaviour
 {
-    [Header("Movement Settings")]
-    public float walkSpeed = 8f;
-    public float wallRunSpeed = 14f;       // Increased for fast, smooth forward momentum
-    public float jumpHeight = 2.5f;
-    public float gravity = -22f;
+    [Header("Base Movement")]
+    [SerializeField] private float walkSpeed = 8f;
+    [SerializeField] private float jumpHeight = 2.5f;
+    [SerializeField] private float gravity = -22f;
 
-    [Header("Wall Running Settings")]
-    public float wallCheckDistance = 0.9f;
-    public float wallRunGravity = -1f;     // Low gravity for horizontal stickiness
-    public float maxWallRunTime = 2.5f;
-    public float wallJumpUpForce = 8f;
-    public float wallJumpSideForce = 10f;
-    public LayerMask wallLayer;
+    [Header("Horizontal Wall Run (Titanfall)")]
+    [SerializeField] private float horizontalWallSpeed = 14f;
+    [SerializeField] private float horizontalWallGravity = -1f;
+    [SerializeField] private float wallJumpSideForce = 10f;
+    [SerializeField] private float wallJumpUpForce = 8f;
+
+    [Header("Vertical Wall Run (Mirror's Edge)")]
+    [SerializeField] private float verticalClimbSpeed = 10f;    // Speed going straight UP
+    [SerializeField] private float maxVerticalClimbTime = 1.5f; // Climb duration limit
+    [SerializeField] private float wallKickBackForce = 8f;      // Push backward from wall
+    [SerializeField] private float wallKickUpForce = 10f;       // Vertical launch height
+
+    [Header("Detection Settings")]
+    [SerializeField] private float wallCheckDistance = 0.9f;
+    [SerializeField] private LayerMask wallLayer;
 
     [Header("References")]
-    public PlayerCamera playerCam;
+    [SerializeField] private Transform playerCamera;
+    [SerializeField] private Transform orientation;
 
+    // Camera Look & Tilt
+    private float xRotation;
+    private float yRotation;
+    private float currentWallTilt;
+
+    // Physics Engine & State
     private CharacterController controller;
     private Vector3 velocity;
     private MovementState state;
 
-    private RaycastHit leftWallHit, rightWallHit;
-    private bool hasWallLeft, hasWallRight;
-    private bool isWallRunning;
-    private float wallRunTimer;
+    private float horizontalInput;
+    private float verticalInput;
 
-    void Start()
+    // Raycast Hits
+    private RaycastHit leftWallHit, rightWallHit, frontWallHit;
+    private bool hasWallLeft, hasWallRight, hasWallFront;
+    private bool isWallRunning;
+    private float climbTimer;
+
+    private void Awake()
     {
         controller = GetComponent<CharacterController>();
-        wallRunTimer = maxWallRunTime;
     }
 
-    void Update()
+    private void Start()
     {
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+        climbTimer = maxVerticalClimbTime;
+    }
+
+    private void Update()
+    {
+        MyInput();
+        HandleMouseLook();
         CheckForWalls();
         UpdateMovementState();
         ExecuteMovement();
-
-        if (playerCam != null)
-        {
-            playerCam.SetWallRunEffects(isWallRunning, hasWallLeft);
-        }
     }
 
-    void CheckForWalls()
+    private void MyInput()
     {
-        Vector3 leftDir = (-transform.right + transform.forward * 0.4f).normalized;
-        Vector3 rightDir = (transform.right + transform.forward * 0.4f).normalized;
+        horizontalInput = Input.GetAxisRaw("Horizontal");
+        verticalInput = Input.GetAxisRaw("Vertical");
+    }
+
+    private void HandleMouseLook()
+    {
+        float mouseX = Input.GetAxisRaw("Mouse X") * Time.deltaTime * 200f;
+        float mouseY = Input.GetAxisRaw("Mouse Y") * Time.deltaTime * 200f;
+
+        yRotation += mouseX;
+        xRotation -= mouseY;
+        xRotation = Mathf.Clamp(xRotation, -85f, 85f);
+
+        // Tilt camera during horizontal wall run only
+        float targetTilt = 0f;
+        if (state == MovementState.HorizontalWallRun)
+        {
+            targetTilt = hasWallLeft ? -12f : 12f;
+        }
+        currentWallTilt = Mathf.Lerp(currentWallTilt, targetTilt, Time.deltaTime * 8f);
+
+        if (playerCamera != null)
+        {
+            playerCamera.localRotation = Quaternion.Euler(xRotation, 0f, currentWallTilt);
+        }
+
+        if (orientation != null)
+        {
+            orientation.rotation = Quaternion.Euler(0f, yRotation, 0f);
+        }
+        transform.rotation = Quaternion.Euler(0f, yRotation, 0f);
+    }
+
+    private void CheckForWalls()
+    {
+        Vector3 leftDir = (-orientation.right + orientation.forward * 0.4f).normalized;
+        Vector3 rightDir = (orientation.right + orientation.forward * 0.4f).normalized;
+        Vector3 frontDir = orientation.forward;
 
         Vector3 highOrigin = transform.position + Vector3.up * 0.6f;
         Vector3 midOrigin = transform.position;
         Vector3 lowOrigin = transform.position - Vector3.up * 0.6f;
 
-        bool leftHigh = Physics.Raycast(highOrigin, leftDir, out RaycastHit leftHighHit, wallCheckDistance, wallLayer);
-        bool leftMid = Physics.Raycast(midOrigin, leftDir, out RaycastHit leftMidHit, wallCheckDistance, wallLayer);
-        bool leftLow = Physics.Raycast(lowOrigin, leftDir, out RaycastHit leftLowHit, wallCheckDistance, wallLayer);
+        // Front Raycasts (Vertical Wall Run Check)
+        hasWallFront = Physics.Raycast(midOrigin, frontDir, out frontWallHit, wallCheckDistance, wallLayer);
 
-        bool rightHigh = Physics.Raycast(highOrigin, rightDir, out RaycastHit rightHighHit, wallCheckDistance, wallLayer);
-        bool rightMid = Physics.Raycast(midOrigin, rightDir, out RaycastHit rightMidHit, wallCheckDistance, wallLayer);
-        bool rightLow = Physics.Raycast(lowOrigin, rightDir, out RaycastHit rightLowHit, wallCheckDistance, wallLayer);
+        // Side Raycasts (Horizontal Wall Run Check)
+        bool leftMid = Physics.Raycast(midOrigin, leftDir, out leftWallHit, wallCheckDistance, wallLayer);
+        bool rightMid = Physics.Raycast(midOrigin, rightDir, out rightWallHit, wallCheckDistance, wallLayer);
 
-        hasWallLeft = leftMid && (leftHigh || leftLow);
-        hasWallRight = rightMid && (rightHigh || rightLow);
-
-        if (hasWallLeft) leftWallHit = leftMidHit;
-        if (hasWallRight) rightWallHit = rightMidHit;
+        hasWallLeft = leftMid;
+        hasWallRight = rightMid;
     }
 
-    void UpdateMovementState()
+    private void UpdateMovementState()
     {
-        bool isHoldingForward = Input.GetAxisRaw("Vertical") > 0;
+        bool isHoldingForward = verticalInput > 0;
 
         if (controller.isGrounded)
         {
             state = MovementState.Grounded;
             isWallRunning = false;
-            wallRunTimer = maxWallRunTime;
+            climbTimer = maxVerticalClimbTime;
 
             velocity.x = 0f;
             velocity.z = 0f;
 
             if (velocity.y < 0) velocity.y = -2f;
         }
-        else if ((hasWallLeft || hasWallRight) && isHoldingForward && wallRunTimer > 0)
+        // 1. VERTICAL WALL RUN: Facing wall directly + holding W + in air
+        else if (hasWallFront && isHoldingForward && climbTimer > 0)
         {
-            // Lock vertical falling momentum instantly upon touching the wall
-            if (!isWallRunning)
-            {
-                velocity.y = 0f;
-            }
-
-            state = MovementState.WallRunning;
+            state = MovementState.VerticalWallRun;
             isWallRunning = true;
-            wallRunTimer -= Time.deltaTime;
+            climbTimer -= Time.deltaTime;
         }
+        // 2. HORIZONTAL WALL RUN: Side wall + holding W + in air
+        else if ((hasWallLeft || hasWallRight) && isHoldingForward && climbTimer > 0)
+        {
+            if (!isWallRunning) velocity.y = 0f;
+
+            state = MovementState.HorizontalWallRun;
+            isWallRunning = true;
+            climbTimer -= Time.deltaTime;
+        }
+        // 3. AIRBORNE
         else
         {
             state = MovementState.Airborne;
@@ -115,38 +174,50 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
-    void ExecuteMovement()
+    private void ExecuteMovement()
     {
         Vector3 finalMove = Vector3.zero;
 
-        if (state == MovementState.WallRunning)
+        // --- STATE 1: VERTICAL CLIMB (MIRROR'S EDGE) ---
+        if (state == MovementState.VerticalWallRun)
+        {
+            // Move vertically UP along the wall face
+            finalMove = Vector3.up * verticalClimbSpeed;
+            velocity.y = verticalClimbSpeed;
+
+            // Backwards Kick-Off Jump
+            if (Input.GetButtonDown("Jump"))
+            {
+                Vector3 wallKickDirection = (-orientation.forward * wallKickBackForce) + (Vector3.up * wallKickUpForce);
+                velocity = wallKickDirection;
+                climbTimer = 0; // End climb
+            }
+        }
+        // --- STATE 2: HORIZONTAL RUN (TITANFALL) ---
+        else if (state == MovementState.HorizontalWallRun)
         {
             RaycastHit wallHit = hasWallLeft ? leftWallHit : rightWallHit;
 
-            // Project forward movement parallel to wall face
-            Vector3 wallDirection = Vector3.ProjectOnPlane(transform.forward, wallHit.normal).normalized;
-            finalMove = wallDirection * wallRunSpeed;
+            Vector3 wallDirection = Vector3.ProjectOnPlane(orientation.forward, wallHit.normal).normalized;
+            finalMove = wallDirection * horizontalWallSpeed;
 
-            // Apply light downward float (clamped so you don't plunge)
-            velocity.y += wallRunGravity * Time.deltaTime;
+            velocity.y += horizontalWallGravity * Time.deltaTime;
             velocity.y = Mathf.Max(velocity.y, -1.5f);
             finalMove.y = velocity.y;
 
-            // Wall Jump
+            // Outward Directional Wall Jump
             if (Input.GetButtonDown("Jump"))
             {
-                Vector3 wallJumpDirection = (wallHit.normal * wallJumpSideForce) + (Vector3.up * wallJumpUpForce) + (transform.forward * 4f);
+                Vector3 wallJumpDirection = (wallHit.normal * wallJumpSideForce) + (Vector3.up * wallJumpUpForce) + (orientation.forward * 4f);
                 velocity = wallJumpDirection;
-                wallRunTimer = 0;
+                climbTimer = 0;
             }
         }
-        else // Grounded or Airborne
+        // --- STATE 3: GROUNDED OR AIRBORNE ---
+        else
         {
-            float x = Input.GetAxis("Horizontal");
-            float z = Input.GetAxis("Vertical");
-
-            Vector3 moveDir = transform.right * x + transform.forward * z;
-            finalMove = moveDir * walkSpeed;
+            Vector3 moveDir = orientation.forward * verticalInput + orientation.right * horizontalInput;
+            finalMove = moveDir.normalized * walkSpeed;
 
             if (Input.GetButtonDown("Jump") && controller.isGrounded)
             {
@@ -157,7 +228,6 @@ public class PlayerMovement : MonoBehaviour
             finalMove.y = velocity.y;
         }
 
-        // Single execution call prevents physics stutter
         controller.Move(finalMove * Time.deltaTime);
     }
 
@@ -168,20 +238,11 @@ public class PlayerMovement : MonoBehaviour
 
     private void OnDrawGizmosSelected()
     {
+        if (orientation == null) return;
+
         Gizmos.color = Color.cyan;
-        Vector3 leftDir = (-transform.right + transform.forward * 0.4f).normalized;
-        Vector3 rightDir = (transform.right + transform.forward * 0.4f).normalized;
-
-        Vector3 highOrigin = transform.position + Vector3.up * 0.6f;
-        Vector3 midOrigin = transform.position;
-        Vector3 lowOrigin = transform.position - Vector3.up * 0.6f;
-
-        Gizmos.DrawRay(highOrigin, leftDir * wallCheckDistance);
-        Gizmos.DrawRay(midOrigin, leftDir * wallCheckDistance);
-        Gizmos.DrawRay(lowOrigin, leftDir * wallCheckDistance);
-
-        Gizmos.DrawRay(highOrigin, rightDir * wallCheckDistance);
-        Gizmos.DrawRay(midOrigin, rightDir * wallCheckDistance);
-        Gizmos.DrawRay(lowOrigin, rightDir * wallCheckDistance);
+        Gizmos.DrawRay(transform.position, orientation.forward * wallCheckDistance);
+        Gizmos.DrawRay(transform.position, (-orientation.right + orientation.forward * 0.4f).normalized * wallCheckDistance);
+        Gizmos.DrawRay(transform.position, (orientation.right + orientation.forward * 0.4f).normalized * wallCheckDistance);
     }
 }
