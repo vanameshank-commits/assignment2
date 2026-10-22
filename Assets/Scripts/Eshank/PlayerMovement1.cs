@@ -3,17 +3,24 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerMovement1 : MonoBehaviour
 {
-    [Header("Movement")]
-    [SerializeField] private float moveSpeed = 7f;
+    [Header("Movement Speeds")]
+    [SerializeField] private float walkSpeed = 7f;
+    [SerializeField] private float sprintSpeed = 12f; // New run speed
+    private float currentSpeed; // Tracks which speed is currently active
+
+    [Header("Movement Physics")]
     [SerializeField] private float groundDrag = 5f;
     [SerializeField] private float jumpForce = 12f;
     [SerializeField] private float jumpCooldown = 0.25f;
     [SerializeField] private float airMultiplier = 0.4f;
 
+    [Header("Keybinds")]
+    [SerializeField] private KeyCode sprintKey = KeyCode.LeftShift; // Key to hold for running
+
     [Header("Mouse Look")]
     [SerializeField] private float sensX = 400f;
     [SerializeField] private float sensY = 400f;
-    [SerializeField] private Transform playerCamera; // Assign your Main Camera here
+    [SerializeField] private Transform playerCamera;
 
     [Header("Ground Check")]
     [SerializeField] private float playerHeight = 2f;
@@ -37,19 +44,18 @@ public class PlayerMovement1 : MonoBehaviour
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        rb.freezeRotation = true; // Prevents the capsule from tipping over
+        rb.freezeRotation = true;
+        currentSpeed = walkSpeed; // Default to walking
     }
 
     private void Start()
     {
-        // Locks the cursor to the center of the screen and hides it
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
     }
 
     private void Update()
     {
-       
         // 1. Ground Check
         grounded = Physics.Raycast(transform.position, Vector3.down, playerHeight * 0.5f + 0.2f, whatIsGround);
 
@@ -62,6 +68,7 @@ public class PlayerMovement1 : MonoBehaviour
             rb.linearDamping = groundDrag;
         else
             rb.linearDamping = 0;
+
         Debug.DrawRay(transform.position, Vector3.down * (playerHeight * 0.5f + 0.2f), Color.red);
     }
 
@@ -74,6 +81,16 @@ public class PlayerMovement1 : MonoBehaviour
     {
         horizontalInput = Input.GetAxisRaw("Horizontal");
         verticalInput = Input.GetAxisRaw("Vertical");
+
+        // Sprinting Logic
+        if (Input.GetKey(sprintKey))
+        {
+            currentSpeed = sprintSpeed;
+        }
+        else
+        {
+            currentSpeed = walkSpeed;
+        }
 
         // 3. Jump Trigger
         if (Input.GetKey(KeyCode.Space) && readyToJump && grounded)
@@ -95,7 +112,6 @@ public class PlayerMovement1 : MonoBehaviour
 
         if (playerCamera != null)
         {
-            // NEW: We added 'wallTilt' to the Z-axis here instead of 0f
             playerCamera.rotation = Quaternion.Euler(xRotation, yRotation, wallTilt);
         }
 
@@ -105,32 +121,29 @@ public class PlayerMovement1 : MonoBehaviour
 
     private void MovePlayer()
     {
-        // Calculate movement direction based on where the camera (orientation) is looking
         moveDirection = orientation.forward * verticalInput + orientation.right * horizontalInput;
 
-        // On ground
+        // Use 'currentSpeed' instead of 'moveSpeed'
         if (grounded)
-            rb.AddForce(moveDirection.normalized * moveSpeed * 10f, ForceMode.Force);
-        // In air
+            rb.AddForce(moveDirection.normalized * currentSpeed * 10f, ForceMode.Force);
         else if (!grounded)
-            rb.AddForce(moveDirection.normalized * moveSpeed * 10f * airMultiplier, ForceMode.Force);
+            rb.AddForce(moveDirection.normalized * currentSpeed * 10f * airMultiplier, ForceMode.Force);
     }
 
     private void SpeedControl()
     {
         Vector3 flatVel = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
 
-        // Limit velocity if needed
-        if (flatVel.magnitude > moveSpeed)
+        // Limit velocity based on the currently active speed
+        if (flatVel.magnitude > currentSpeed)
         {
-            Vector3 limitedVel = flatVel.normalized * moveSpeed;
+            Vector3 limitedVel = flatVel.normalized * currentSpeed;
             rb.linearVelocity = new Vector3(limitedVel.x, rb.linearVelocity.y, limitedVel.z);
         }
     }
 
     private void Jump()
     {
-        // Reset y velocity to ensure jump is always the exact same height
         rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
         rb.AddForce(transform.up * jumpForce, ForceMode.Impulse);
     }

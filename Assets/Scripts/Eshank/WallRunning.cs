@@ -6,8 +6,10 @@ public class WallRunning : MonoBehaviour
 {
     [Header("Wall Running Tuning")]
     [SerializeField] private float wallRunSpeed = 8f;
+    [SerializeField] private float wallSprintSpeed = 12f;
     [SerializeField] private float wallGravityDownforce = 2f;
     [SerializeField] private float maxWallRunTime = 1.5f;
+    [SerializeField] private KeyCode sprintKey = KeyCode.LeftShift;
 
     [Header("Wall Jumping")]
     [SerializeField] private float wallJumpUpForce = 7f;
@@ -18,12 +20,9 @@ public class WallRunning : MonoBehaviour
     [SerializeField] private float wallCheckDistance = 1f;
     [SerializeField] private float minHeightOffGround = 1.5f;
 
-    [Header("Camera stuff")]
-    [SerializeField] private Transform fpsArms;
+    [Header("Camera Tilt")]
     [SerializeField] private float camTiltAmount = 15f;
     [SerializeField] private float tiltSpeed = 10f;
-    [SerializeField] private Vector3 armOffsetOnWall = new Vector3(0.4f, -0.1f, 0.2f);
-    [SerializeField] private Vector3 armRotationOnWall = new Vector3(0f, 0f, 25f);
 
     [Header("References")]
     [SerializeField] private Transform orientation;
@@ -34,8 +33,6 @@ public class WallRunning : MonoBehaviour
 
     // Visual State
     private float currentTilt;
-    private Vector3 defaultArmLocalPos;
-    private Quaternion defaultArmLocalRot;
 
     // State Transitions
     private enum MovementState { Grounded, Airborne, WallRunning }
@@ -54,18 +51,6 @@ public class WallRunning : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
         pm = GetComponent<PlayerMovement1>();
-    }
-
-    private void Start()
-    {
-        if (fpsArms != null)
-        {
-            defaultArmLocalPos = fpsArms.localPosition;
-            defaultArmLocalRot = fpsArms.localRotation;
-
-            // NEW: Hide the arms immediately when the game starts
-            fpsArms.gameObject.SetActive(false);
-        }
     }
 
     private void Update()
@@ -125,35 +110,22 @@ public class WallRunning : MonoBehaviour
     private void HandleProceduralVisuals()
     {
         float targetTilt = 0f;
-        Vector3 targetArmPos = defaultArmLocalPos;
-        Quaternion targetArmRot = defaultArmLocalRot;
 
         if (currentState == MovementState.WallRunning)
         {
-            float frictionBob = Mathf.Sin(Time.time * 30f) * 0.02f;
-
             if (wallLeft)
             {
                 targetTilt = -camTiltAmount;
-                targetArmPos = defaultArmLocalPos + new Vector3(-armOffsetOnWall.x, armOffsetOnWall.y + frictionBob, armOffsetOnWall.z);
-                targetArmRot = defaultArmLocalRot * Quaternion.Euler(-armRotationOnWall.x, -armRotationOnWall.y, -armRotationOnWall.z);
             }
             else if (wallRight)
             {
                 targetTilt = camTiltAmount;
-                targetArmPos = defaultArmLocalPos + new Vector3(armOffsetOnWall.x, armOffsetOnWall.y + frictionBob, armOffsetOnWall.z);
-                targetArmRot = defaultArmLocalRot * Quaternion.Euler(armRotationOnWall);
             }
         }
 
+        // Smoothly transition camera tilt
         currentTilt = Mathf.Lerp(currentTilt, targetTilt, Time.deltaTime * tiltSpeed);
         pm.wallTilt = currentTilt;
-
-        if (fpsArms != null && fpsArms.gameObject.activeInHierarchy)
-        {
-            fpsArms.localPosition = Vector3.Lerp(fpsArms.localPosition, targetArmPos, Time.deltaTime * tiltSpeed);
-            fpsArms.localRotation = Quaternion.Lerp(fpsArms.localRotation, targetArmRot, Time.deltaTime * tiltSpeed);
-        }
     }
 
     private void StartWallRun()
@@ -162,9 +134,6 @@ public class WallRunning : MonoBehaviour
         wallRunTimer = maxWallRunTime;
         rb.useGravity = false;
         rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
-
-        // NEW: Make the arms visible when we attach to the wall
-        if (fpsArms != null) fpsArms.gameObject.SetActive(true);
     }
 
     private void ExecuteWallRunMovement()
@@ -172,7 +141,9 @@ public class WallRunning : MonoBehaviour
         Vector3 wallNormal = wallRight ? rightWallHit.normal : leftWallHit.normal;
         Vector3 wallForward = Vector3.ProjectOnPlane(orientation.forward, wallNormal).normalized;
 
-        rb.linearVelocity = new Vector3(wallForward.x * wallRunSpeed, rb.linearVelocity.y, wallForward.z * wallRunSpeed);
+        float currentSpeed = Input.GetKey(sprintKey) ? wallSprintSpeed : wallRunSpeed;
+
+        rb.linearVelocity = new Vector3(wallForward.x * currentSpeed, rb.linearVelocity.y, wallForward.z * currentSpeed);
         rb.AddForce(Vector3.down * wallGravityDownforce, ForceMode.Force);
         rb.AddForce(-wallNormal * 100f, ForceMode.Force);
 
@@ -184,9 +155,6 @@ public class WallRunning : MonoBehaviour
     {
         currentState = MovementState.Airborne;
         rb.useGravity = true;
-
-        // NEW: Hide the arms again when we fall off or jump off the wall
-        if (fpsArms != null) fpsArms.gameObject.SetActive(false);
     }
 
     private void WallJump()
