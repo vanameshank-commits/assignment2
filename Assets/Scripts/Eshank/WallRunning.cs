@@ -7,7 +7,7 @@ public class WallRunning : MonoBehaviour
     [Header("Wall Running Tuning")]
     [SerializeField] private float wallRunSpeed = 8f;
     [SerializeField] private float wallSprintSpeed = 12f;
-    [SerializeField] private float wallGravityDownforce = 2f;
+    [SerializeField] private float wallSinkSpeed = 2f; // NEW: Controls the downward slant
     [SerializeField] private float maxWallRunTime = 1.5f;
     [SerializeField] private KeyCode sprintKey = KeyCode.LeftShift;
 
@@ -143,8 +143,10 @@ public class WallRunning : MonoBehaviour
 
         float currentSpeed = Input.GetKey(sprintKey) ? wallSprintSpeed : wallRunSpeed;
 
-        rb.linearVelocity = new Vector3(wallForward.x * currentSpeed, rb.linearVelocity.y, wallForward.z * currentSpeed);
-        rb.AddForce(Vector3.down * wallGravityDownforce, ForceMode.Force);
+        // NEW: Apply forward speed and force the Y velocity downward using wallSinkSpeed
+        rb.linearVelocity = new Vector3(wallForward.x * currentSpeed, -wallSinkSpeed, wallForward.z * currentSpeed);
+
+        // Keep the player stuck to the wall
         rb.AddForce(-wallNormal * 100f, ForceMode.Force);
 
         wallRunTimer -= Time.fixedDeltaTime;
